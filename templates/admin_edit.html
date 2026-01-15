@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block header %}Edit Admin Authority{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 500px; margin: 0 auto;">
+    <h3>Editing: {{ user.username }} ({{ user.custom_id }})</h3>
+    <p>Current Role: <strong>{{ user.role }}</strong></p>
+    
+    <form method="POST">
+        <div style="margin-bottom: 20px;">
+            <label>New Authority Level</label>
+            <select name="role" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <option value="Staff" {% if user.role == 'Staff' %}selected{% endif %}>Staff</option>
+                <option value="Manager" {% if user.role == 'Manager' %}selected{% endif %}>Manager</option>
+                <option value="SuperAdmin" {% if user.role == 'SuperAdmin' %}selected{% endif %}>SuperAdmin</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Update Authority</button>
+    </form>
+    <div style="text-align: center; margin-top: 15px;">
+        <a href="{{ url_for('admin_panel') }}">Cancel</a>
+    </div>
+</div>
+{% endblock %}
