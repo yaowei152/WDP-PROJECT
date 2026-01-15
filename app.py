@@ -79,12 +79,17 @@ def get_change(current, previous):
         return 100 if current > 0 else 0
     return ((current - previous) / previous) * 100
 
+def format_k(value):
+    """Formats large numbers (e.g. 1500 -> 1.5k, 1000000 -> 1.0M)"""
+    if value >= 1000000: return f"{value/1000000:.1f}M"
+    if value >= 1000: return f"{value/1000:.1f}k"
+    return str(value)
+
 # --- 4. ROUTES ---
 
 @app.route('/')
 def home():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
+    if 'user_id' not in session: return redirect(url_for('login'))
     return redirect(url_for('dashboard'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -108,7 +113,6 @@ def logout():
     session.pop('user_id', None)
     return redirect(url_for('login'))
 
-# --- NEW DASHBOARD LOGIC ---
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -118,12 +122,14 @@ def dashboard():
     last_year = current_year - 1
     current_month = now.month
     
-    # Calculate previous month for comparison
+    # Calculate previous month for comparison logic
     last_month_date = now.replace(day=1) - timedelta(days=1)
     prev_month = last_month_date.month
     prev_month_year = last_month_date.year
 
-    # --- 1. TOP CARDS DATA ---
+    # ==========================================
+    # PART 1: TOP KPI CARDS (Image 1 Style)
+    # ==========================================
     
     # Total Orders (All time)
     total_orders = Order.query.count()
@@ -140,11 +146,13 @@ def dashboard():
     products_prev = Invoice.query.filter(Invoice.status=='Paid', Invoice.date_created < now - timedelta(days=30)).count()
     product_growth = get_change(products_sold, products_prev)
 
-    # New Customers (Static growth for demo as created_at missing on client)
+    # New Customers
     new_customers = Client.query.count() 
     customer_growth = 1.29 
 
-    # --- 2. MIDDLE SECTION (YTD & MTD) ---
+    # ==========================================
+    # PART 2: MIDDLE STATS (Image 2 Style)
+    # ==========================================
 
     # YTD (Year to Date)
     ytd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == current_year).scalar() or 0
@@ -178,26 +186,90 @@ def dashboard():
     ).count()
     mtd_count_diff = mtd_count - last_mtd_count
 
-    # --- FORMATTING HELPER ---
-    def format_k(value):
-        if value >= 1000000: return f"{value/1000000:.1f}M"
-        if value >= 1000: return f"{value/1000:.1f}k"
-        return str(value)
+    # ==========================================
+    # PART 3: GRAPHS DATA (Original Style)
+    # ==========================================
+
+    # 1. Monthly Sales Bar Chart (Data for Chart.js)
+    chart_invoice_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
+    chart_invoice_reality = [0] * 12 
+    monthly_sales_query = db.session.query(
+        extract('month', Invoice.date_created).label('month'),
+        func.sum(Invoice.amount).label('total')
+    ).filter(extract('year', Invoice.date_created) == current_year).group_by('month').all()
+    
+    for m, total in monthly_sales_query:
+        chart_invoice_reality[int(m)-1] = total
+        
+    chart_invoice_target = [20000] * 12 # Static Target example
+
+    # 2. Orders YTD Donut (Pending vs Invoiced)
+    ytd_invoiced_amt = db.session.query(func.sum(Order.amount)).filter(
+        extract('year', Order.date_placed) == current_year, Order.status == 'Invoiced'
+    ).scalar() or 0
+    ytd_pending_amt = db.session.query(func.sum(Order.amount)).filter(
+        extract('year', Order.date_placed) == current_year, Order.status == 'Pending'
+    ).scalar() or 0
+    chart_orders_ytd_pct = [round(ytd_invoiced_amt), round(ytd_pending_amt)]
+    # Safety check to prevent empty chart error
+    if sum(chart_orders_ytd_pct) == 0: chart_orders_ytd_pct = [0, 1]
+
+    # 3. Orders MTD Donut (Pending vs Invoiced)
+    mtd_invoiced_amt = db.session.query(func.sum(Order.amount)).filter(
+        extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month, Order.status == 'Invoiced'
+    ).scalar() or 0
+    mtd_pending_amt = db.session.query(func.sum(Order.amount)).filter(
+        extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month, Order.status == 'Pending'
+    ).scalar() or 0
+    chart_orders_mtd_pct = [round(mtd_invoiced_amt), round(mtd_pending_amt)]
+    if sum(chart_orders_mtd_pct) == 0: chart_orders_mtd_pct = [0, 1]
+
+    # 4. Top Clients Progress Bar
+    top_clients_query = db.session.query(
+        Client.name, func.sum(Invoice.amount)
+    ).join(Invoice).group_by(Client.name).order_by(func.sum(Invoice.amount).desc()).limit(4).all()
+    
+    top_clients_progress = []
+    if top_clients_query:
+        max_val = top_clients_query[0][1] if top_clients_query[0][1] > 0 else 1
+        for client in top_clients_query:
+            percent = min(round((client[1] / max_val) * 100), 100)
+            top_clients_progress.append({'name': client[0], 'amount': client[1], 'percent': percent})
+
+    # 5. Volume vs Service (Last 5 days)
+    chart_vol_service_labels = []
+    chart_vol_data = []
+    chart_service_data = []
+    for i in range(4, -1, -1):
+        day = now - timedelta(days=i)
+        chart_vol_service_labels.append(day.strftime('%a'))
+        chart_vol_data.append(Order.query.filter(func.date(Order.date_placed) == day.date()).count())
+        chart_service_data.append(Invoice.query.filter(func.date(Invoice.date_created) == day.date()).count())
+    
+    # 6. Satisfaction (Static Mock)
+    chart_sat_labels = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']
+    chart_sat_data = [85, 82, 88, 84, 91, 87, 94]
+
 
     return render_template('dashboard.html',
+        # KPIs
         total_orders=format_k(total_orders), order_growth=order_growth,
         total_sales=format_k(total_sales), sales_growth=sales_growth,
         products_sold=products_sold, product_growth=product_growth,
         new_customers=new_customers, customer_growth=customer_growth,
         
+        # Middle Stats
         ytd_sales=format_k(ytd_sales), ytd_sales_growth=format_k(abs(ytd_sales_growth)), ytd_pos=(ytd_sales_growth>=0),
         ytd_count=format_k(ytd_count), ytd_count_growth=format_k(abs(ytd_count_growth)), ytd_count_pos=(ytd_count_growth>=0),
-        
         mtd_sales=format_k(mtd_sales), mtd_sales_diff=format_k(abs(mtd_sales_diff)), mtd_pos=(mtd_sales_diff>=0),
         mtd_count=mtd_count, mtd_count_diff=abs(mtd_count_diff), mtd_count_pos=(mtd_count_diff>=0),
         
-        # Empty placeholders for old charts to prevent errors if template still references them
-        top_clients=[], top_clients_progress=[]
+        # Charts Arrays
+        chart_invoice_months=chart_invoice_months, chart_invoice_reality=chart_invoice_reality, chart_invoice_target=chart_invoice_target,
+        chart_orders_ytd_pct=chart_orders_ytd_pct, chart_orders_mtd_pct=chart_orders_mtd_pct,
+        top_clients_progress=top_clients_progress,
+        chart_sat_labels=chart_sat_labels, chart_sat_data=chart_sat_data,
+        chart_vol_service_labels=chart_vol_service_labels, chart_vol_data=chart_vol_data, chart_service_data=chart_service_data
     )
 
 @app.route('/orders')
@@ -320,14 +392,14 @@ def error_page():
 def guide():
     return render_template('guide.html')
 
-# --- 5. DATA GENERATORS ---
+# --- 5. DATA GENERATOR (Available via URL manually) ---
 
 @app.route('/generate_bulk_data')
 def generate_bulk_data():
-    """Generates 150+ records spanning 2 years for Dashboard Testing."""
+    """Generates 150+ records spanning 2 years. Access via URL."""
     if 'user_id' not in session: return redirect(url_for('login'))
     
-    # 1. Create Clients
+    # Create Clients
     client_names = [
         "Apex Logistics", "Beta Solutions", "Gamma Ray Inc", "Delta Force Security",
         "Echo Chambers", "Foxtrot Systems", "Golf Clubs Ltd", "Hotel Trivago",
@@ -346,7 +418,7 @@ def generate_bulk_data():
             clients.append(exists)
     db.session.commit()
 
-    # 2. Create Orders & Invoices (2 Years History)
+    # Create Orders & Invoices (2 Years History)
     descriptions = ["Web Hosting", "UI Design", "Consultation", "Repair Service", "Hardware Install", "SEO Optimization", "Security Audit", "Python Scripting"]
     start_date = datetime.now() - timedelta(days=730) 
     end_date = datetime.now()
