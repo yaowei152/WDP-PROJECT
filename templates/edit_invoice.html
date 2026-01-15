@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block header %}Edit Invoice{% endblock %}
+
+{% block content %}
+    <div class="review-box">
+        <h3 style="margin-bottom: 20px; color: #2c3e50;">Edit Invoice: {{ invoice.invoice_code }}</h3>
+        
+        <form method="POST">
+            <div class="form-row">
+                <label>Client</label>
+                <input type="text" class="readonly" value="{{ invoice.client.name }}" readonly>
+            </div>
+            <div class="form-row">
+                <label>Original Order Description</label>
+                <input type="text" class="readonly" value="{{ invoice.order.description }}" readonly>
+            </div>
+
+            <div class="form-row">
+                <label>Amount (SGD)</label>
+                <input type="number" step="0.01" name="amount" value="{{ invoice.amount }}" required style="width: 100%; padding: 10px; border: 1px solid #bdc3c7; border-radius: 4px;">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status" style="width: 100%; padding: 10px;">
+                    <option value="Draft" {% if invoice.status == 'Draft' %}selected{% endif %}>Draft</option>
+                    <option value="Sent" {% if invoice.status == 'Sent' %}selected{% endif %}>Sent</option>
+                    <option value="Paid" {% if invoice.status == 'Paid' %}selected{% endif %}>Paid</option>
+                    <option value="Overdue" {% if invoice.status == 'Overdue' %}selected{% endif %}>Overdue</option>
+                    <option value="Unpaid" {% if invoice.status == 'Unpaid' %}selected{% endif %}>Unpaid</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Due Date</label>
+                <input type="date" name="date_due" value="{{ invoice.date_due.strftime('%Y-%m-%d') }}" required style="width: 100%; padding: 10px; border: 1px solid #bdc3c7; border-radius: 4px;">
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success" style="flex: 2;">Save Changes</button>
+                <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-secondary" style="flex: 1; text-align: center;">Cancel</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

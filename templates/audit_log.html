@@ -3,7 +3,6 @@
 {% block header %}System Audit Log{% endblock %}
 
 {% block content %}
-    <!-- Audit Log Filtering (Requirement 3.5) -->
     <div class="filter-bar">
         <form method="get" style="display: flex; gap: 15px; align-items: center; width: 100%;">
             <strong>Filter Logs:</strong>
@@ -17,7 +16,8 @@
             <select name="action">
                 <option value="">All Actions</option>
                 <option value="Invoice Generated">Invoice Generated</option>
-                <option value="Payment Received">Payment Received</option>
+                <option value="Invoice Edited">Invoice Edited</option>
+                <option value="Invoice Deleted">Invoice Deleted</option>
                 <option value="Login">Login</option>
             </select>
             
@@ -33,9 +33,10 @@
                     <th>Timestamp</th>
                     <th>Actor</th>
                     <th>Action</th>
-                    <th>Entity ID</th>
+                    <th>Entity</th>
                     <th>Status</th>
                     <th>Description</th>
+                    <th>Details</th>
                 </tr>
             </thead>
             <tbody>
@@ -52,7 +53,12 @@
                         <small>{{ log.entity_id }}</small>
                     </td>
                     <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
-                    <td style="color: #555;">{{ log.description }}</td>
+                    <td style="color: #555; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ log.description }}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('audit_details', log_id=log.id) }}" class="btn btn-secondary btn-sm">See More</a>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

@@ -104,7 +104,6 @@ def logout():
 
 @app.route('/dashboard')
 def dashboard():
-    """Calculates KPIs and shows the Dashboard with REAL-TIME DB DATA."""
     if 'user_id' not in session: return redirect(url_for('login'))
     
     # --- Existing KPI Calculations ---
@@ -119,120 +118,71 @@ def dashboard():
         Client.name, func.sum(Invoice.amount)
     ).join(Invoice).group_by(Client.name).order_by(func.sum(Invoice.amount).desc()).limit(4).all()
 
-    # =========================================================
-    # === NEW DYNAMIC CHART DATA (Connected to Database) ======
-    # =========================================================
-    
+    # --- Chart Data (Using Real DB Logic from previous step) ---
     current_year = datetime.now().year
     current_month = datetime.now().month
 
-    # 1. Invoiced Bar Chart Data (Monthly Comparison)
-    # Goal: Get total invoice amount for every month of the current year
+    # 1. Monthly Sales
     chart_invoice_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
-    
-    # Initialize list with 0s for 12 months
     chart_invoice_reality = [0] * 12 
-    
-    # Query: Sum invoice amounts grouped by month for current year
     monthly_sales = db.session.query(
         extract('month', Invoice.date_created).label('month'),
         func.sum(Invoice.amount).label('total')
     ).filter(extract('year', Invoice.date_created) == current_year).group_by('month').all()
-
-    # Fill in the reality list with query results
     for month, total in monthly_sales:
         chart_invoice_reality[int(month)-1] = total
-
-    # Target Sales (Hardcoded "Budget" for comparison - e.g. $20k/month)
     chart_invoice_target = [20000] * 12
 
-    # 2. Orders YTD Donut (Pending vs Invoiced)
+    # 2. YTD
     ytd_invoiced = db.session.query(func.sum(Order.amount)).filter(
-        extract('year', Order.date_placed) == current_year, 
-        Order.status == 'Invoiced'
+        extract('year', Order.date_placed) == current_year, Order.status == 'Invoiced'
     ).scalar() or 0
-    
     ytd_pending = db.session.query(func.sum(Order.amount)).filter(
-        extract('year', Order.date_placed) == current_year, 
-        Order.status == 'Pending'
+        extract('year', Order.date_placed) == current_year, Order.status == 'Pending'
     ).scalar() or 0
+    chart_orders_ytd_pct = [round(ytd_invoiced), round(ytd_pending)] if (ytd_invoiced + ytd_pending) > 0 else [0,100]
 
-    # Avoid div/0 if no orders exist
-    if (ytd_invoiced + ytd_pending) == 0:
-        chart_orders_ytd_pct = [0, 100]
-    else:
-        chart_orders_ytd_pct = [round(ytd_invoiced), round(ytd_pending)]
-
-    # 3. Orders MTD Donut (This Month Only)
+    # 3. MTD
     mtd_invoiced = db.session.query(func.sum(Order.amount)).filter(
-        extract('year', Order.date_placed) == current_year,
-        extract('month', Order.date_placed) == current_month,
-        Order.status == 'Invoiced'
+        extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month, Order.status == 'Invoiced'
     ).scalar() or 0
-    
     mtd_pending = db.session.query(func.sum(Order.amount)).filter(
-        extract('year', Order.date_placed) == current_year,
-        extract('month', Order.date_placed) == current_month,
-        Order.status == 'Pending'
+        extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month, Order.status == 'Pending'
     ).scalar() or 0
-    
-    if (mtd_invoiced + mtd_pending) == 0:
-        chart_orders_mtd_pct = [0, 100]
-    else:
-        chart_orders_mtd_pct = [round(mtd_invoiced), round(mtd_pending)]
+    chart_orders_mtd_pct = [round(mtd_invoiced), round(mtd_pending)] if (mtd_invoiced + mtd_pending) > 0 else [0,100]
 
-    # 4. Top Clients Progress Bar (Dynamic)
+    # 4. Top Clients Progress
     top_clients_progress = []
     if top_clients:
         max_val = top_clients[0][1] if top_clients[0][1] > 0 else 1
         for client in top_clients:
             percent = min(round((client[1] / max_val) * 100), 100)
             top_clients_progress.append({'name': client[0], 'amount': client[1], 'percent': percent})
-    else:
-        top_clients_progress = [] # Empty if no data
 
-    # 5. Volume vs Service (Last 5 Days Activity)
-    # We will map "Volume" to # of Orders placed, and "Service" to # of Invoices Generated
+    # 5. Vol vs Service
     chart_vol_service_labels = []
-    chart_vol_data = []     # Orders Count
-    chart_service_data = [] # Invoices Count
-
-    for i in range(4, -1, -1): # Loop backwards 5 days
+    chart_vol_data = []
+    chart_service_data = []
+    for i in range(4, -1, -1):
         day = datetime.now() - timedelta(days=i)
-        label = day.strftime('%a') # Mon, Tue...
-        chart_vol_service_labels.append(label)
+        chart_vol_service_labels.append(day.strftime('%a'))
+        chart_vol_data.append(Order.query.filter(func.date(Order.date_placed) == day.date()).count())
+        chart_service_data.append(Invoice.query.filter(func.date(Invoice.date_created) == day.date()).count())
 
-        # Count Orders on this day
-        cnt_orders = Order.query.filter(func.date(Order.date_placed) == day.date()).count()
-        chart_vol_data.append(cnt_orders)
-
-        # Count Invoices on this day
-        cnt_invoices = Invoice.query.filter(func.date(Invoice.date_created) == day.date()).count()
-        chart_service_data.append(cnt_invoices)
-
-    # 6. Satisfaction (Simulated - No DB table exists for this yet)
+    # 6. Satisfaction
     chart_sat_labels = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']
     chart_sat_data = [85, 82, 88, 84, 91, 87, 94]
 
     return render_template('dashboard.html', 
-                           total_invoices=total_invoices,
-                           total_revenue=total_revenue,
-                           paid_invoices=paid_invoices,
-                           unpaid_invoices=unpaid_invoices,
-                           avg_proc_time=avg_proc_time,
-                           top_clients=top_clients,
-                           chart_invoice_months=chart_invoice_months,
-                           chart_invoice_reality=chart_invoice_reality,
-                           chart_invoice_target=chart_invoice_target,
-                           chart_orders_ytd_pct=chart_orders_ytd_pct,
-                           chart_orders_mtd_pct=chart_orders_mtd_pct,
-                           top_clients_progress=top_clients_progress,
-                           chart_sat_labels=chart_sat_labels,
-                           chart_sat_data=chart_sat_data,
-                           chart_vol_service_labels=chart_vol_service_labels,
-                           chart_vol_data=chart_vol_data,
-                           chart_service_data=chart_service_data
-                           )
+                           total_invoices=total_invoices, total_revenue=total_revenue,
+                           paid_invoices=paid_invoices, unpaid_invoices=unpaid_invoices,
+                           avg_proc_time=avg_proc_time, top_clients=top_clients,
+                           chart_invoice_months=chart_invoice_months, chart_invoice_reality=chart_invoice_reality,
+                           chart_invoice_target=chart_invoice_target, chart_orders_ytd_pct=chart_orders_ytd_pct,
+                           chart_orders_mtd_pct=chart_orders_mtd_pct, top_clients_progress=top_clients_progress,
+                           chart_sat_labels=chart_sat_labels, chart_sat_data=chart_sat_data,
+                           chart_vol_service_labels=chart_vol_service_labels, chart_vol_data=chart_vol_data,
+                           chart_service_data=chart_service_data)
 
 @app.route('/orders')
 def orders():
@@ -243,44 +193,34 @@ def orders():
 @app.route('/invoices', methods=['GET'])
 def invoices():
     if 'user_id' not in session: return redirect(url_for('login'))
-    
     search_query = request.args.get('search', '')
     if search_query:
         invoices = Invoice.query.filter(Invoice.invoice_code.contains(search_query)).all()
     else:
         invoices = Invoice.query.order_by(Invoice.date_created.desc()).all()
-        
     return render_template('invoices.html', invoices=invoices)
 
 @app.route('/invoices/create/<int:order_id>', methods=['GET', 'POST'])
 def create_invoice(order_id):
     if 'user_id' not in session: return redirect(url_for('login'))
-    
     order = Order.query.get_or_404(order_id)
-    
     if request.method == 'POST':
         try:
             new_code = f"INV-{datetime.now().strftime('%Y%m%d')}-{random.randint(100,999)}"
             new_invoice = Invoice(
-                invoice_code=new_code,
-                order_id=order.id,
-                client_id=order.client_id,
-                amount=order.amount,
-                status='Sent',
-                date_due=datetime.utcnow() + timedelta(days=30)
+                invoice_code=new_code, order_id=order.id, client_id=order.client_id,
+                amount=order.amount, status='Sent', date_due=datetime.utcnow() + timedelta(days=30)
             )
             db.session.add(new_invoice)
             order.status = 'Invoiced'
             db.session.commit()
             log_action('System', 'AI-Invoice-Bot', 'Invoice Generated', 'Invoice', new_code, 'Success', f'Auto-generated invoice for Order #{order.id}')
-            
             flash(f'Invoice {new_code} generated successfully!')
             return redirect(url_for('invoices'))
         except Exception as e:
             db.session.rollback()
             log_action('System', 'AI-Invoice-Bot', 'Invoice Generation Failed', 'Invoice', 'N/A', 'Failure', str(e))
             return redirect(url_for('error_page'))
-            
     return render_template('create_invoice.html', order=order)
 
 @app.route('/invoices/view/<int:invoice_id>')
@@ -289,8 +229,86 @@ def view_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     return render_template('view_invoice.html', invoice=invoice)
 
+# --- NEW ROUTE: EDIT INVOICE ---
+@app.route('/invoices/edit/<int:invoice_id>', methods=['GET', 'POST'])
+def edit_invoice(invoice_id):
+    """Allows manual editing of invoice details and logs changes."""
+    if 'user_id' not in session: return redirect(url_for('login'))
+    
+    invoice = Invoice.query.get_or_404(invoice_id)
+    
+    if request.method == 'POST':
+        try:
+            # Capture old values for Audit Log
+            old_amount = invoice.amount
+            old_status = invoice.status
+            old_due_date = invoice.date_due.strftime('%Y-%m-%d')
+            
+            # Update with new values from form
+            invoice.amount = float(request.form['amount'])
+            invoice.status = request.form['status']
+            invoice.date_due = datetime.strptime(request.form['date_due'], '%Y-%m-%d')
+            
+            # Determine what changed
+            changes = []
+            if old_amount != invoice.amount:
+                changes.append(f"Amount: ${old_amount} -> ${invoice.amount}")
+            if old_status != invoice.status:
+                changes.append(f"Status: {old_status} -> {invoice.status}")
+            if old_due_date != request.form['date_due']:
+                changes.append(f"Due Date: {old_due_date} -> {request.form['date_due']}")
+            
+            db.session.commit()
+            
+            # Detailed Logging
+            if changes:
+                change_log = ", ".join(changes)
+                log_action('User', session['username'], 'Invoice Edited', 'Invoice', invoice.invoice_code, 'Success', change_log)
+                flash(f'Invoice {invoice.invoice_code} updated successfully.')
+            else:
+                flash('No changes detected.')
+                
+            return redirect(url_for('view_invoice', invoice_id=invoice.id))
+            
+        except Exception as e:
+            db.session.rollback()
+            log_action('User', session['username'], 'Invoice Edit Failed', 'Invoice', invoice.invoice_code, 'Failure', str(e))
+            return redirect(url_for('error_page'))
+
+    return render_template('edit_invoice.html', invoice=invoice)
+
+# --- NEW ROUTE: DELETE INVOICE ---
+@app.route('/invoices/delete/<int:invoice_id>', methods=['POST'])
+def delete_invoice(invoice_id):
+    """Deletes an invoice and logs specific details."""
+    if 'user_id' not in session: return redirect(url_for('login'))
+    
+    invoice = Invoice.query.get_or_404(invoice_id)
+    code = invoice.invoice_code
+    
+    try:
+        # Construct detailed log BEFORE deletion
+        details = f"Deleted Invoice {code}. Amount: ${invoice.amount}. Client: {invoice.client.name}. Order Ref: #{invoice.order_id}."
+        
+        # Reset linked order status if needed (Optional business logic)
+        if invoice.order:
+            invoice.order.status = 'Pending' # Revert order to pending so it can be re-invoiced if needed
+        
+        db.session.delete(invoice)
+        db.session.commit()
+        
+        log_action('User', session['username'], 'Invoice Deleted', 'Invoice', code, 'Success', details)
+        flash(f'Invoice {code} deleted successfully.')
+        return redirect(url_for('invoices'))
+        
+    except Exception as e:
+        db.session.rollback()
+        log_action('User', session['username'], 'Invoice Delete Failed', 'Invoice', code, 'Failure', str(e))
+        return redirect(url_for('error_page'))
+
 @app.route('/audit')
 def audit_log():
+    """Shows Audit Log with Filters."""
     if 'user_id' not in session: return redirect(url_for('login'))
     
     status_filter = request.args.get('status')
@@ -305,6 +323,14 @@ def audit_log():
     logs = query.order_by(AuditLog.timestamp.desc()).all()
     return render_template('audit_log.html', logs=logs)
 
+# --- NEW ROUTE: AUDIT DETAILS ---
+@app.route('/audit/view/<int:log_id>')
+def audit_details(log_id):
+    """Shows specific details for a single audit log entry."""
+    if 'user_id' not in session: return redirect(url_for('login'))
+    log = AuditLog.query.get_or_404(log_id)
+    return render_template('audit_details.html', log=log)
+
 @app.route('/error')
 def error_page():
     return render_template('error.html')
@@ -317,51 +343,61 @@ def guide():
 with app.app_context():
     db.create_all()
     if not User.query.first():
-        print("Creating default admin user...")
         admin = User(username='admin', password='password123')
         db.session.add(admin)
-        
         c1 = Client(name='TechSolutions Pte Ltd', email='contact@techsol.sg', company='TechSolutions')
         c2 = Client(name='Green Grocer', email='boss@greengrocer.com', company='Green Grocer')
         db.session.add_all([c1, c2])
         db.session.commit()
-        
         o1 = Order(client_id=c1.id, description='IT Consultation - Q1', amount=5000.00, status='Pending')
         o2 = Order(client_id=c2.id, description='Bulk Vegetable Order', amount=1200.50, status='Invoiced')
         db.session.add_all([o1, o2])
         db.session.commit()
-        
         i1 = Invoice(invoice_code='INV-20250115-001', order_id=o2.id, client_id=c2.id, amount=1200.50, status='Paid', date_due=datetime.utcnow())
         db.session.add(i1)
         db.session.commit()
-        
         log_action('System', 'Auto-Invoice-Service', 'Invoice Generated', 'Invoice', 'INV-20250115-001', 'Success', 'Initial Data Load')
 
 @app.route('/generate_test_data')
 def generate_test_data():
     if 'user_id' not in session: return redirect(url_for('login'))
-    
-    client = Client.query.first()
-    if not client:
-        client = Client(name="Test Client", email="test@example.com", company="Tester Co.")
-        db.session.add(client)
+    clients = Client.query.all()
+    if not clients:
+        c1 = Client(name="Alpha Corp", email="contact@alpha.com", company="Alpha Corp")
+        c2 = Client(name="Beta Industries", email="accounts@beta.com", company="Beta Ind")
+        db.session.add_all([c1, c2])
         db.session.commit()
-    
-    descriptions = ["Web Design Service", "Server Maintenance", "Consultation Fee", "Software License", "Hardware Repair"]
-    
-    for _ in range(3):
-        random_amount = random.randint(100, 5000) + 0.50
-        new_order = Order(
-            client_id=client.id,
-            description=random.choice(descriptions),
-            amount=random_amount,
-            status='Pending' 
-        )
-        db.session.add(new_order)
-    
+        clients = [c1, c2]
+    import random
+    current_year = datetime.now().year
+    # Historical
+    for month in range(1, 13):
+        if month <= datetime.now().month:
+            for _ in range(random.randint(1, 3)):
+                client = random.choice(clients)
+                amount = random.randint(1000, 5000)
+                date_event = datetime(current_year, month, random.randint(1, 28))
+                order = Order(client_id=client.id, description=f"Service {month}", amount=amount, date_placed=date_event, status='Invoiced')
+                db.session.add(order)
+                db.session.commit()
+                inv = Invoice(invoice_code=f"INV-{current_year}{month:02d}-{random.randint(100,999)}", order_id=order.id, client_id=client.id, amount=amount, status='Paid', date_created=date_event, date_due=date_event)
+                db.session.add(inv)
+    # Recent
+    for i in range(5):
+        day = datetime.now() - timedelta(days=i)
+        for _ in range(random.randint(1, 3)):
+            client = random.choice(clients)
+            amt = random.randint(500, 1500)
+            status = 'Pending' if random.choice([True, False]) else 'Invoiced'
+            order = Order(client_id=client.id, description=f"Rush {i}", amount=amt, date_placed=day, status=status)
+            db.session.add(order)
+            if status == 'Invoiced':
+                db.session.commit()
+                inv = Invoice(invoice_code=f"INV-NOW-{random.randint(1000,9999)}", order_id=order.id, client_id=client.id, amount=amt, status='Sent', date_created=day, date_due=day)
+                db.session.add(inv)
     db.session.commit()
-    flash("3 New Test Orders Created! Go to 'Orders' to generate invoices for them.")
-    return redirect(url_for('orders'))
+    flash("Test Data Generated.")
+    return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
     app.run(debug=True)

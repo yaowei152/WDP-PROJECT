@@ -3,10 +3,31 @@
 {% block header %}Invoice Details{% endblock %}
 
 {% block content %}
-    <!-- Invoice Container -->
+    <style>
+        @media print {
+            .sidebar, .header, .btn, .filter-bar, .alert, .badge-actions { 
+                display: none !important; 
+            }
+            .main-content { 
+                padding: 0; 
+                margin: 0; 
+            }
+            body { 
+                background-color: white; 
+                -webkit-print-color-adjust: exact; 
+            }
+            .invoice-container {
+                box-shadow: none;
+                margin: 0;
+                width: 100%;
+                max-width: 100%;
+                border: none;
+            }
+        }
+    </style>
+
     <div class="invoice-container" style="background: white; padding: 40px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
         
-        <!-- Header -->
         <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px;">
             <div>
                 <h1 style="color: #2c3e50;">INVOICE</h1>
@@ -21,7 +42,6 @@
             </div>
         </div>
 
-        <!-- Bill To Section -->
         <div style="margin-bottom: 40px;">
             <h3 style="color: #34495e; margin-bottom: 10px;">Bill To:</h3>
             <p><strong>{{ invoice.client.name }}</strong></p>
@@ -29,7 +49,6 @@
             <p>{{ invoice.client.email }}</p>
         </div>
 
-        <!-- Line Items -->
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
             <thead style="background: #f8f9fa;">
                 <tr>
@@ -47,7 +66,6 @@
                         ${{ "%.2f"|format(invoice.amount) }}
                     </td>
                 </tr>
-                <!-- Total Row -->
                 <tr style="font-weight: bold; background-color: #fcfcfc;">
                     <td style="padding: 15px; text-align: right;">Total Due:</td>
                     <td style="padding: 15px; text-align: right; color: #2c3e50; font-size: 18px;">
@@ -57,15 +75,19 @@
             </tbody>
         </table>
 
-        <!-- Status & Actions -->
-        <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="badge-actions" style="background: #f8f9fa; padding: 20px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
             <div>
                 Status: <span class="badge badge-{{ invoice.status }}" style="font-size: 14px;">{{ invoice.status }}</span>
             </div>
             
             <div style="display: flex; gap: 10px;">
-                <button onclick="window.print()" class="btn btn-primary">Print / Save as PDF</button>
-                <a href="{{ url_for('invoices') }}" class="btn btn-secondary">Back to List</a>
+                <a href="{{ url_for('edit_invoice', invoice_id=invoice.id) }}" class="btn btn-secondary" style="background-color: #f39c12;">Edit</a>
+                
+                <button onclick="window.print()" class="btn btn-primary">Print / PDF</button>
+
+                <form action="{{ url_for('delete_invoice', invoice_id=invoice.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this invoice? This action will be logged.');" style="display:inline;">
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
             </div>
         </div>
 
