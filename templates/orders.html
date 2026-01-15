@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block header %}Orders Management{% endblock %}
+
+{% block content %}
+    <div class="filter-bar">
+        <p style="color: #666;">Select a 'Pending' order below to automatically generate an invoice using the AI Assistant.</p>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Order ID</th>
+                    <th>Client</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Date Placed</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                <tr>
+                    <td>#{{ order.id }}</td>
+                    <td>{{ order.client.name }}</td>
+                    <td>{{ order.description }}</td>
+                    <td>${{ "%.2f"|format(order.amount) }}</td>
+                    <td>{{ order.date_placed.strftime('%Y-%m-%d') }}</td>
+                    <td><span class="badge badge-{{ order.status }}">{{ order.status }}</span></td>
+                    <td>
+                        {% if order.status == 'Pending' %}
+                        <!-- This button triggers the AI logic -->
+                        <a href="{{ url_for('create_invoice', order_id=order.id) }}" class="btn btn-success btn-sm">
+                            Auto-Generate Invoice
+                        </a>
+                        {% else %}
+                        <span style="color: #aaa; font-size: 14px;">Invoiced</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

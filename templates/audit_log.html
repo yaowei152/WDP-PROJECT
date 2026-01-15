@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block header %}System Audit Log{% endblock %}
+
+{% block content %}
+    <!-- Audit Log Filtering (Requirement 3.5) -->
+    <div class="filter-bar">
+        <form method="get" style="display: flex; gap: 15px; align-items: center; width: 100%;">
+            <strong>Filter Logs:</strong>
+            
+            <select name="status">
+                <option value="">All Statuses</option>
+                <option value="Success">Success</option>
+                <option value="Failure">Failure</option>
+            </select>
+            
+            <select name="action">
+                <option value="">All Actions</option>
+                <option value="Invoice Generated">Invoice Generated</option>
+                <option value="Payment Received">Payment Received</option>
+                <option value="Login">Login</option>
+            </select>
+            
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="{{ url_for('audit_log') }}" class="btn btn-secondary">Reset</a>
+        </form>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Entity ID</th>
+                    <th>Status</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        {{ log.actor_type }}<br>
+                        <small style="color: #7f8c8d;">{{ log.actor_id }}</small>
+                    </td>
+                    <td style="font-weight: bold;">{{ log.action }}</td>
+                    <td>
+                        {{ log.entity_type }}<br>
+                        <small>{{ log.entity_id }}</small>
+                    </td>
+                    <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+                    <td style="color: #555;">{{ log.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

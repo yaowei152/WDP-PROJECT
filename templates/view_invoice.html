@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block header %}Invoice Details{% endblock %}
+
+{% block content %}
+    <!-- Invoice Container -->
+    <div class="invoice-container" style="background: white; padding: 40px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+        
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px;">
+            <div>
+                <h1 style="color: #2c3e50;">INVOICE</h1>
+                <p style="color: #7f8c8d;">Invoice #: <strong>{{ invoice.invoice_code }}</strong></p>
+                <p style="color: #7f8c8d;">Date: {{ invoice.date_created.strftime('%Y-%m-%d') }}</p>
+                <p style="color: #7f8c8d;">Due Date: {{ invoice.date_due.strftime('%Y-%m-%d') }}</p>
+            </div>
+            <div style="text-align: right;">
+                <h2 style="color: #3498db;">Your Company Name</h2>
+                <p>123 Business Rd, Singapore</p>
+                <p>admin@yourcompany.com</p>
+            </div>
+        </div>
+
+        <!-- Bill To Section -->
+        <div style="margin-bottom: 40px;">
+            <h3 style="color: #34495e; margin-bottom: 10px;">Bill To:</h3>
+            <p><strong>{{ invoice.client.name }}</strong></p>
+            <p>{{ invoice.client.company }}</p>
+            <p>{{ invoice.client.email }}</p>
+        </div>
+
+        <!-- Line Items -->
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+            <thead style="background: #f8f9fa;">
+                <tr>
+                    <th style="padding: 15px; text-align: left; border-bottom: 2px solid #ddd;">Description</th>
+                    <th style="padding: 15px; text-align: right; border-bottom: 2px solid #ddd;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="padding: 15px; border-bottom: 1px solid #eee;">
+                        {{ invoice.order.description }}<br>
+                        <small style="color: #999;">Order Ref: #{{ invoice.order.id }}</small>
+                    </td>
+                    <td style="padding: 15px; text-align: right; border-bottom: 1px solid #eee;">
+                        ${{ "%.2f"|format(invoice.amount) }}
+                    </td>
+                </tr>
+                <!-- Total Row -->
+                <tr style="font-weight: bold; background-color: #fcfcfc;">
+                    <td style="padding: 15px; text-align: right;">Total Due:</td>
+                    <td style="padding: 15px; text-align: right; color: #2c3e50; font-size: 18px;">
+                        ${{ "%.2f"|format(invoice.amount) }}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Status & Actions -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                Status: <span class="badge badge-{{ invoice.status }}" style="font-size: 14px;">{{ invoice.status }}</span>
+            </div>
+            
+            <div style="display: flex; gap: 10px;">
+                <button onclick="window.print()" class="btn btn-primary">Print / Save as PDF</button>
+                <a href="{{ url_for('invoices') }}" class="btn btn-secondary">Back to List</a>
+            </div>
+        </div>
+
+    </div>
+{% endblock %}

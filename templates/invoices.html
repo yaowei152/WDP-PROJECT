@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block header %}Invoice Management{% endblock %}
+
+{% block content %}
+    <!-- Find Function (Requirement 3.4) -->
+    <div class="filter-bar">
+        <form action="{{ url_for('invoices') }}" method="get" style="display: flex; gap: 10px; flex: 1;">
+            <input type="text" name="search" placeholder="Search by Invoice Code (e.g., INV-2025-001)" style="flex: 1;">
+            <button type="submit" class="btn btn-primary">Find Invoice</button>
+            <a href="{{ url_for('invoices') }}" class="btn btn-secondary">Reset</a>
+        </form>
+    </div>
+
+    <!-- Invoice List -->
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Invoice Code</th>
+                    <th>Client</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Date Due</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_code }}</td>
+                    <td>{{ invoice.client.name }}</td>
+                    <td>${{ "%.2f"|format(invoice.amount) }}</td>
+                    <td><span class="badge badge-{{ invoice.status }}">{{ invoice.status }}</span></td>
+                    <td>{{ invoice.date_due.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">View</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 20px;">No invoices found matching your search.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

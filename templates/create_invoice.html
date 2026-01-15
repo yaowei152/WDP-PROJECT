@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block header %}AI Invoice Generation{% endblock %}
+
+{% block content %}
+    <div class="review-box">
+        <h3 style="margin-bottom: 20px; color: #2c3e50;">Review Extracted Data</h3>
+        <p style="color: #7f8c8d; margin-bottom: 30px; line-height: 1.5;">
+            The system has analyzed <strong>Order #{{ order.id }}</strong> and pre-filled the invoice details below. 
+            Please review before sending.
+        </p>
+        
+        <form method="POST">
+            <div class="form-row">
+                <label>Client Name</label>
+                <input type="text" class="readonly" value="{{ order.client.name }}" readonly>
+            </div>
+            
+            <div class="form-row">
+                <label>Billing Email</label>
+                <input type="text" class="readonly" value="{{ order.client.email }}" readonly>
+            </div>
+
+            <div class="form-row">
+                <label>Description</label>
+                <input type="text" class="readonly" value="{{ order.description }}" readonly>
+            </div>
+
+            <div class="form-row">
+                <label>Total Amount (SGD)</label>
+                <input type="text" class="readonly" value="${{ "%.2f"|format(order.amount) }}" readonly>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success" style="flex: 2;">Confirm & Send Invoice</button>
+                <a href="{{ url_for('orders') }}" class="btn btn-danger" style="flex: 1; text-align: center;">Cancel</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
