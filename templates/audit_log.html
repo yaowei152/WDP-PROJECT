@@ -32,17 +32,54 @@
     }
     .status-Success { background: #d4edda; color: #155724; }
     .status-Failure { background: #f8d7da; color: #721c24; }
+
+    /* Search Bar Styling */
+    .filter-bar {
+        display: flex;
+        gap: 15px;
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        align-items: center;
+        border: 1px solid #e9ecef;
+    }
+    
+    .filter-input {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        flex: 1;
+    }
+    
+    .filter-select {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        min-width: 200px;
+    }
 </style>
 
 <div class="card">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
         <h3>Activity History</h3>
-        <div>
-            <a href="{{ url_for('audit_log', status='Success') }}" class="btn btn-secondary">Success Only</a>
-            <a href="{{ url_for('audit_log', status='Failure') }}" class="btn btn-secondary">Failures Only</a>
-            <a href="{{ url_for('audit_log') }}" class="btn btn-secondary">Reset</a>
-        </div>
+        <a href="{{ url_for('audit_log') }}" class="btn btn-sm btn-secondary">Reset Filters</a>
     </div>
+
+    <form method="GET" action="{{ url_for('audit_log') }}" class="filter-bar">
+        <input type="text" name="q" class="filter-input" placeholder="Search keywords (e.g. invoice code, user...)" value="{{ request.args.get('q', '') }}">
+        
+        <select name="action_type" class="filter-select" onchange="this.form.submit()">
+            <option value="All">All Actions</option>
+            {% for action in unique_actions %}
+                <option value="{{ action }}" {% if request.args.get('action_type') == action %}selected{% endif %}>
+                    {{ action }}
+                </option>
+            {% endfor %}
+        </select>
+        
+        <button type="submit" class="btn btn-primary">Search</button>
+    </form>
     
     <table class="table">
         <thead>
@@ -73,7 +110,9 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="text-align: center;">No audit records found.</td>
+                <td colspan="7" style="text-align: center;">
+                    No audit records found matching your criteria.
+                </td>
             </tr>
             {% endfor %}
         </tbody>

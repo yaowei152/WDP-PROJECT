@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, extract 
+from sqlalchemy import func, extract, or_
 from datetime import datetime, timedelta
 import random
 import os
@@ -122,39 +122,30 @@ def dashboard():
     last_year = current_year - 1
     current_month = now.month
     
-    # Calculate previous month for comparison logic
     last_month_date = now.replace(day=1) - timedelta(days=1)
     prev_month = last_month_date.month
     prev_month_year = last_month_date.year
 
-    # ==========================================
-    # PART 1: TOP KPI CARDS (Image 1 Style)
-    # ==========================================
-    
-    # Total Orders (All time)
+    # KPI 1: Orders
     total_orders = Order.query.count()
     total_orders_prev = Order.query.filter(Order.date_placed < now - timedelta(days=30)).count()
     order_growth = get_change(total_orders, total_orders_prev)
 
-    # Total Sales (All Invoices)
+    # KPI 2: Sales
     total_sales = db.session.query(func.sum(Invoice.amount)).scalar() or 0
     sales_prev = db.session.query(func.sum(Invoice.amount)).filter(Invoice.date_created < now.replace(day=1)).scalar() or 0
     sales_growth = get_change(total_sales, sales_prev)
 
-    # Product Sold (Proxy: Paid Invoices)
+    # KPI 3: Products/Paid
     products_sold = Invoice.query.filter_by(status='Paid').count()
     products_prev = Invoice.query.filter(Invoice.status=='Paid', Invoice.date_created < now - timedelta(days=30)).count()
     product_growth = get_change(products_sold, products_prev)
 
-    # New Customers
+    # KPI 4: Customers
     new_customers = Client.query.count() 
     customer_growth = 1.29 
 
-    # ==========================================
-    # PART 2: MIDDLE STATS (Image 2 Style)
-    # ==========================================
-
-    # YTD (Year to Date)
+    # Stats: YTD
     ytd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == current_year).scalar() or 0
     last_ytd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == last_year).scalar() or 0
     ytd_sales_growth = ytd_sales - last_ytd_sales
@@ -163,7 +154,7 @@ def dashboard():
     last_ytd_count = Order.query.filter(extract('year', Order.date_placed) == last_year).count()
     ytd_count_growth = ytd_count - last_ytd_count
 
-    # MTD (Month to Date)
+    # Stats: MTD
     mtd_sales = db.session.query(func.sum(Order.amount)).filter(
         extract('year', Order.date_placed) == current_year, 
         extract('month', Order.date_placed) == current_month
@@ -186,11 +177,7 @@ def dashboard():
     ).count()
     mtd_count_diff = mtd_count - last_mtd_count
 
-    # ==========================================
-    # PART 3: GRAPHS DATA (Original Style)
-    # ==========================================
-
-    # 1. Monthly Sales Bar Chart (Data for Chart.js)
+    # Graph Data
     chart_invoice_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
     chart_invoice_reality = [0] * 12 
     monthly_sales_query = db.session.query(
@@ -201,9 +188,8 @@ def dashboard():
     for m, total in monthly_sales_query:
         chart_invoice_reality[int(m)-1] = total
         
-    chart_invoice_target = [20000] * 12 # Static Target example
+    chart_invoice_target = [20000] * 12 
 
-    # 2. Orders YTD Donut (Pending vs Invoiced)
     ytd_invoiced_amt = db.session.query(func.sum(Order.amount)).filter(
         extract('year', Order.date_placed) == current_year, Order.status == 'Invoiced'
     ).scalar() or 0
@@ -211,10 +197,8 @@ def dashboard():
         extract('year', Order.date_placed) == current_year, Order.status == 'Pending'
     ).scalar() or 0
     chart_orders_ytd_pct = [round(ytd_invoiced_amt), round(ytd_pending_amt)]
-    # Safety check to prevent empty chart error
     if sum(chart_orders_ytd_pct) == 0: chart_orders_ytd_pct = [0, 1]
 
-    # 3. Orders MTD Donut (Pending vs Invoiced)
     mtd_invoiced_amt = db.session.query(func.sum(Order.amount)).filter(
         extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month, Order.status == 'Invoiced'
     ).scalar() or 0
@@ -224,7 +208,6 @@ def dashboard():
     chart_orders_mtd_pct = [round(mtd_invoiced_amt), round(mtd_pending_amt)]
     if sum(chart_orders_mtd_pct) == 0: chart_orders_mtd_pct = [0, 1]
 
-    # 4. Top Clients Progress Bar
     top_clients_query = db.session.query(
         Client.name, func.sum(Invoice.amount)
     ).join(Invoice).group_by(Client.name).order_by(func.sum(Invoice.amount).desc()).limit(4).all()
@@ -236,7 +219,6 @@ def dashboard():
             percent = min(round((client[1] / max_val) * 100), 100)
             top_clients_progress.append({'name': client[0], 'amount': client[1], 'percent': percent})
 
-    # 5. Volume vs Service (Last 5 days)
     chart_vol_service_labels = []
     chart_vol_data = []
     chart_service_data = []
@@ -246,25 +228,18 @@ def dashboard():
         chart_vol_data.append(Order.query.filter(func.date(Order.date_placed) == day.date()).count())
         chart_service_data.append(Invoice.query.filter(func.date(Invoice.date_created) == day.date()).count())
     
-    # 6. Satisfaction (Static Mock)
     chart_sat_labels = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']
     chart_sat_data = [85, 82, 88, 84, 91, 87, 94]
 
-
     return render_template('dashboard.html',
-        # KPIs
         total_orders=format_k(total_orders), order_growth=order_growth,
         total_sales=format_k(total_sales), sales_growth=sales_growth,
         products_sold=products_sold, product_growth=product_growth,
         new_customers=new_customers, customer_growth=customer_growth,
-        
-        # Middle Stats
         ytd_sales=format_k(ytd_sales), ytd_sales_growth=format_k(abs(ytd_sales_growth)), ytd_pos=(ytd_sales_growth>=0),
         ytd_count=format_k(ytd_count), ytd_count_growth=format_k(abs(ytd_count_growth)), ytd_count_pos=(ytd_count_growth>=0),
         mtd_sales=format_k(mtd_sales), mtd_sales_diff=format_k(abs(mtd_sales_diff)), mtd_pos=(mtd_sales_diff>=0),
         mtd_count=mtd_count, mtd_count_diff=abs(mtd_count_diff), mtd_count_pos=(mtd_count_diff>=0),
-        
-        # Charts Arrays
         chart_invoice_months=chart_invoice_months, chart_invoice_reality=chart_invoice_reality, chart_invoice_target=chart_invoice_target,
         chart_orders_ytd_pct=chart_orders_ytd_pct, chart_orders_mtd_pct=chart_orders_mtd_pct,
         top_clients_progress=top_clients_progress,
@@ -347,7 +322,6 @@ def edit_invoice(invoice_id):
             db.session.rollback()
             log_action('User', session['username'], 'Invoice Edit Failed', 'Invoice', invoice.invoice_code, 'Failure', str(e))
             return redirect(url_for('error_page'))
-    return render_template('edit_invoice.html', invoice=invoice)
 
 @app.route('/invoices/delete/<int:invoice_id>', methods=['POST'])
 def delete_invoice(invoice_id):
@@ -367,16 +341,39 @@ def delete_invoice(invoice_id):
         log_action('User', session['username'], 'Invoice Delete Failed', 'Invoice', code, 'Failure', str(e))
         return redirect(url_for('error_page'))
 
+# --- AUDIT LOG ROUTE (UPDATED) ---
 @app.route('/audit')
 def audit_log():
     if 'user_id' not in session: return redirect(url_for('login'))
-    status_filter = request.args.get('status')
-    action_filter = request.args.get('action')
+    
+    # Get filters from URL parameters
+    search_q = request.args.get('q', '')
+    action_filter = request.args.get('action_type', '')
+    
     query = AuditLog.query
-    if status_filter: query = query.filter_by(status=status_filter)
-    if action_filter: query = query.filter_by(action=action_filter)
+    
+    # Apply Search Filter (matches description, action, actor, or entity ID)
+    if search_q:
+        search_term = f"%{search_q}%"
+        query = query.filter(
+            or_(
+                AuditLog.description.like(search_term),
+                AuditLog.action.like(search_term),
+                AuditLog.actor_id.like(search_term),
+                AuditLog.entity_id.like(search_term)
+            )
+        )
+    
+    # Apply Dropdown Action Filter
+    if action_filter and action_filter != 'All':
+        query = query.filter(AuditLog.action == action_filter)
+
     logs = query.order_by(AuditLog.timestamp.desc()).all()
-    return render_template('audit_log.html', logs=logs)
+    
+    # Get unique actions for the dropdown
+    unique_actions = [r.action for r in db.session.query(AuditLog.action).distinct()]
+    
+    return render_template('audit_log.html', logs=logs, unique_actions=unique_actions)
 
 @app.route('/audit/view/<int:log_id>')
 def audit_details(log_id):
@@ -392,34 +389,42 @@ def error_page():
 def guide():
     return render_template('guide.html')
 
-# --- 5. DATA GENERATOR (Available via URL manually) ---
+# --- DATA GENERATOR (UPDATED - Fashion Theme) ---
 
 @app.route('/generate_bulk_data')
 def generate_bulk_data():
     """Generates 150+ records spanning 2 years. Access via URL."""
     if 'user_id' not in session: return redirect(url_for('login'))
     
-    # Create Clients
+    # 1. Clothing & Fashion Clients
     client_names = [
-        "Apex Logistics", "Beta Solutions", "Gamma Ray Inc", "Delta Force Security",
-        "Echo Chambers", "Foxtrot Systems", "Golf Clubs Ltd", "Hotel Trivago",
-        "India Tech", "Juliet Designs", "Kilo Weighing", "Lima Beans Co",
-        "Mike Mechanics", "November Rain Pub", "Oscar Awards", "Papa Johns Pizza"
+        "Vogue Styles", "Urban Trends Boutique", "Silk & Cotton Co", "Velvet Runway",
+        "Modern Menswear", "Chic Streetwear", "Luxe Fabrics Ltd", "Denim Supply Depot",
+        "Kids Corner Fashion", "Summer Breeze Apparel", "Winter Warmth Gear", "Athletic Aesthetics",
+        "Vintage Threads", "Haute Couture House", "Basic Essentials", "Fashion Forward Inc"
     ]
     
     clients = []
     for name in client_names:
         exists = Client.query.filter_by(name=name).first()
         if not exists:
-            c = Client(name=name, email=f"contact@{name.replace(' ','').lower()}.com", company=name)
+            # Create cleaner emails
+            email_slug = name.replace(' ', '').replace('&', 'and').lower()
+            c = Client(name=name, email=f"contact@{email_slug}.com", company=name)
             db.session.add(c)
             clients.append(c)
         else:
             clients.append(exists)
     db.session.commit()
 
-    # Create Orders & Invoices (2 Years History)
-    descriptions = ["Web Hosting", "UI Design", "Consultation", "Repair Service", "Hardware Install", "SEO Optimization", "Security Audit", "Python Scripting"]
+    # 2. Fashion Order Descriptions
+    descriptions = [
+        "Summer Collection Shipment", "Bulk T-Shirts Printing", "Winter Coats Manufacturing", 
+        "Silk Scarf Production", "Denim Jeans Supply", "Fashion Photoshoot Styling", 
+        "Runway Accessories", "Custom Embroidery Service", "Leather Jacket Order", 
+        "Sustainable Cotton Fabrics", "Activewear Line Launch", "Vintage Dress Restoration"
+    ]
+    
     start_date = datetime.now() - timedelta(days=730) 
     end_date = datetime.now()
     
@@ -429,7 +434,11 @@ def generate_bulk_data():
         
         client = random.choice(clients)
         desc = random.choice(descriptions)
-        amount = random.uniform(500, 8000)
+        # Amounts vary by type (simulated)
+        if "Bulk" in desc or "Supply" in desc:
+            amount = random.uniform(2000, 15000)
+        else:
+            amount = random.uniform(500, 4000)
         
         status = 'Invoiced' if random.random() > 0.3 else 'Pending'
         
@@ -453,7 +462,7 @@ def generate_bulk_data():
             db.session.add(inv)
             
     db.session.commit()
-    flash("Success! Added 150+ mock orders and invoices spanning 2 years.")
+    flash("Success! Added 150+ fashion-related mock orders and invoices.")
     return redirect(url_for('dashboard'))
 
 # --- 6. INITIALIZATION ---
