@@ -10,11 +10,12 @@
     <style>
         /* CSS specific to the new Dashboard Layout */
         
-        /* TOP SECTION (4 Cards - Image 1) */
+        /* 1. TOP SECTION: KPI CARDS (4 Colored Cards) */
         .kpi-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 25px;
+            /* margin-top removed so it sits at the top */
             margin-bottom: 30px;
         }
 
@@ -79,7 +80,7 @@
         .growth-down { background-color: #fee2e2; color: #b91c1c; }
 
 
-        /* MIDDLE SECTION (2 Big Cards - Image 2) */
+        /* 2. MIDDLE SECTION: STATS (2 Big Text Cards) */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
@@ -133,7 +134,7 @@
         .trend-down { color: #ef4444; }
         .trend-text { color: #64748b; font-weight: 500;}
 
-        /* BOTTOM SECTION (Restored Charts from Original) */
+        /* 3. BOTTOM SECTION: GRAPHS */
         .card { 
             background: white; 
             padding: 20px; 

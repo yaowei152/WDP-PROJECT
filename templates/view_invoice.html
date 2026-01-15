@@ -1,95 +1,155 @@
 {% extends "base.html" %}
 
-{% block header %}Invoice Details{% endblock %}
+{% block header %}
+    Invoice Details: {{ invoice.invoice_code }}
+{% endblock %}
 
 {% block content %}
-    <style>
-        @media print {
-            .sidebar, .header, .btn, .filter-bar, .alert, .badge-actions { 
-                display: none !important; 
-            }
-            .main-content { 
-                padding: 0; 
-                margin: 0; 
-            }
-            body { 
-                background-color: white; 
-                -webkit-print-color-adjust: exact; 
-            }
-            .invoice-container {
-                box-shadow: none;
-                margin: 0;
-                width: 100%;
-                max-width: 100%;
-                border: none;
-            }
-        }
-    </style>
 
-    <div class="invoice-container" style="background: white; padding: 40px; border-radius: 8px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-        
-        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px;">
-            <div>
-                <h1 style="color: #2c3e50;">INVOICE</h1>
-                <p style="color: #7f8c8d;">Invoice #: <strong>{{ invoice.invoice_code }}</strong></p>
-                <p style="color: #7f8c8d;">Date: {{ invoice.date_created.strftime('%Y-%m-%d') }}</p>
-                <p style="color: #7f8c8d;">Due Date: {{ invoice.date_due.strftime('%Y-%m-%d') }}</p>
-            </div>
-            <div style="text-align: right;">
-                <h2 style="color: #3498db;">Your Company Name</h2>
-                <p>123 Business Rd, Singapore</p>
-                <p>admin@yourcompany.com</p>
-            </div>
+<style>
+    .modal-overlay {
+        display: none; /* Hidden by default */
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.6);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .modal-content {
+        background-color: white;
+        padding: 30px;
+        border-radius: 12px;
+        width: 400px;
+        text-align: center;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        animation: fadeIn 0.3s ease-out;
+    }
+
+    .modal-icon {
+        font-size: 50px;
+        color: #e74c3c;
+        margin-bottom: 15px;
+    }
+
+    .modal-actions {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin-top: 25px;
+    }
+
+    .btn-cancel {
+        background-color: #95a5a6;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    
+    .btn-confirm-delete {
+        background-color: #e74c3c;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+<div class="card" style="max-width: 800px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px;">
+        <div>
+            <h2>{{ invoice.client.company }}</h2>
+            <p style="color: #777;">{{ invoice.client.name }} | {{ invoice.client.email }}</p>
         </div>
-
-        <div style="margin-bottom: 40px;">
-            <h3 style="color: #34495e; margin-bottom: 10px;">Bill To:</h3>
-            <p><strong>{{ invoice.client.name }}</strong></p>
-            <p>{{ invoice.client.company }}</p>
-            <p>{{ invoice.client.email }}</p>
+        <div style="text-align: right;">
+            <h3>Status: <span style="color: {{ 'green' if invoice.status == 'Paid' else 'orange' }}">{{ invoice.status }}</span></h3>
+            <p>Due: {{ invoice.date_due.strftime('%Y-%m-%d') }}</p>
         </div>
-
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-            <thead style="background: #f8f9fa;">
-                <tr>
-                    <th style="padding: 15px; text-align: left; border-bottom: 2px solid #ddd;">Description</th>
-                    <th style="padding: 15px; text-align: right; border-bottom: 2px solid #ddd;">Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td style="padding: 15px; border-bottom: 1px solid #eee;">
-                        {{ invoice.order.description }}<br>
-                        <small style="color: #999;">Order Ref: #{{ invoice.order.id }}</small>
-                    </td>
-                    <td style="padding: 15px; text-align: right; border-bottom: 1px solid #eee;">
-                        ${{ "%.2f"|format(invoice.amount) }}
-                    </td>
-                </tr>
-                <tr style="font-weight: bold; background-color: #fcfcfc;">
-                    <td style="padding: 15px; text-align: right;">Total Due:</td>
-                    <td style="padding: 15px; text-align: right; color: #2c3e50; font-size: 18px;">
-                        ${{ "%.2f"|format(invoice.amount) }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div class="badge-actions" style="background: #f8f9fa; padding: 20px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                Status: <span class="badge badge-{{ invoice.status }}" style="font-size: 14px;">{{ invoice.status }}</span>
-            </div>
-            
-            <div style="display: flex; gap: 10px;">
-                <a href="{{ url_for('edit_invoice', invoice_id=invoice.id) }}" class="btn btn-secondary" style="background-color: #f39c12;">Edit</a>
-                
-                <button onclick="window.print()" class="btn btn-primary">Print / PDF</button>
-
-                <form action="{{ url_for('delete_invoice', invoice_id=invoice.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this invoice? This action will be logged.');" style="display:inline;">
-                    <button type="submit" class="btn btn-danger">Delete</button>
-                </form>
-            </div>
-        </div>
-
     </div>
+
+    <table class="table">
+        <tr>
+            <th>Order Ref</th>
+            <td>#{{ invoice.order_id }}</td>
+        </tr>
+        <tr>
+            <th>Description</th>
+            <td>{{ invoice.order.description }}</td>
+        </tr>
+        <tr>
+            <th>Date Created</th>
+            <td>{{ invoice.date_created.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        <tr>
+            <th>Amount</th>
+            <td style="font-size: 1.2em; font-weight: bold;">${{ "%.2f"|format(invoice.amount) }}</td>
+        </tr>
+    </table>
+
+    <div style="margin-top: 30px; display: flex; gap: 10px;">
+        <a href="{{ url_for('invoices') }}" class="btn btn-secondary">Back to List</a>
+        <a href="{{ url_for('edit_invoice', invoice_id=invoice.id) }}" class="btn btn-primary">Edit Invoice</a>
+        
+        <form id="deleteForm" action="{{ url_for('delete_invoice', invoice_id=invoice.id) }}" method="POST" style="margin-left: auto;">
+            <button type="button" class="btn btn-danger" onclick="showDeleteModal()">Delete Invoice</button>
+        </form>
+    </div>
+</div>
+
+<div id="deleteModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-icon">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <h3>Delete Invoice?</h3>
+        <p style="color: #555; margin-top: 10px;">
+            Are you sure you want to delete invoice <strong>{{ invoice.invoice_code }}</strong>?<br>
+            This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="hideDeleteModal()">Cancel</button>
+            <button class="btn-confirm-delete" onclick="confirmDelete()">Yes, Delete it</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Functions to handle the modal popup
+    function showDeleteModal() {
+        document.getElementById('deleteModal').style.display = 'flex';
+    }
+
+    function hideDeleteModal() {
+        document.getElementById('deleteModal').style.display = 'none';
+    }
+
+    function confirmDelete() {
+        // Submit the form programmatically
+        document.getElementById('deleteForm').submit();
+    }
+
+    // Close modal if user clicks outside the content box
+    window.onclick = function(event) {
+        var modal = document.getElementById('deleteModal');
+        if (event.target == modal) {
+            hideDeleteModal();
+        }
+    }
+</script>
+
 {% endblock %}
