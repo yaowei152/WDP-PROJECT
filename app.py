@@ -18,6 +18,22 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+# --- TIME TRAVEL TRACKER ---
+OFFSET_FILE = os.path.join(basedir, 'time_offset.json')
+
+def get_total_skipped_days():
+    if not os.path.exists(OFFSET_FILE): return 0
+    try:
+        with open(OFFSET_FILE, 'r') as f: return json.load(f).get('days_skipped', 0)
+    except: return 0
+
+def add_skipped_days(days):
+    new_total = get_total_skipped_days() + days
+    with open(OFFSET_FILE, 'w') as f: json.dump({'days_skipped': new_total}, f)
+
+def reset_skipped_days():
+    with open(OFFSET_FILE, 'w') as f: json.dump({'days_skipped': 0}, f)
+
 # --- 2. DATABASE MODELS ---
 
 class User(db.Model):
@@ -37,6 +53,7 @@ class Client(db.Model):
 
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    order_code = db.Column(db.String(50), unique=True) 
     client_id = db.Column(db.Integer, db.ForeignKey('client.id'), nullable=False)
     description = db.Column(db.String(200), nullable=False)
     amount = db.Column(db.Float, nullable=False)
@@ -51,7 +68,7 @@ class Invoice(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey('order.id'))
     client_id = db.Column(db.Integer, db.ForeignKey('client.id'), nullable=False)
     amount = db.Column(db.Float, nullable=False)
-    status = db.Column(db.String(50), default='Draft') 
+    status = db.Column(db.String(50), default='Pending') 
     date_created = db.Column(db.DateTime, default=datetime.utcnow)
     date_due = db.Column(db.DateTime)
     
@@ -125,12 +142,17 @@ def login():
         user = User.query.filter_by(username=username, password=password).first()
         if user:
             if user.is_suspended:
+                log_action('User', username, 'Login Blocked', 'Session', 'N/A', 'Failure', 'Suspended account attempted login')
                 flash('Your account has been suspended. Please contact the Super Admin.')
                 return render_template('login.html')
+            
             session['user_id'] = user.id
+            log_action('User', username, 'Login', 'Session', 'N/A', 'Success', 'User logged in successfully')
+            
             if user.must_change_password: return redirect(url_for('change_password'))
             return redirect(url_for('dashboard'))
         else:
+            log_action('User', username, 'Login Failed', 'Session', 'N/A', 'Failure', 'Invalid password attempt')
             flash('Invalid credentials')
     return render_template('login.html')
 
@@ -152,6 +174,7 @@ def change_password():
         user.password = new_pass
         user.must_change_password = False 
         db.session.commit()
+        log_action('User', user.username, 'Password Changed', 'User', user.custom_id, 'Success', 'User updated their own password')
         return redirect(url_for('dashboard'))
     return render_template('change_password.html', user=user)
 
@@ -172,7 +195,7 @@ def orders():
             or_(
                 Client.name.like(search_term),
                 Order.description.like(search_term),
-                func.cast(Order.id, db.String).like(search_term)
+                Order.order_code.like(search_term)
             )
         )
 
@@ -195,11 +218,38 @@ def orders():
 @app.route('/invoices', methods=['GET'])
 def invoices():
     if 'user_id' not in session: return redirect(url_for('login'))
+    
+    today = datetime.now().date()
+    overdue_invoices = Invoice.query.filter(
+        or_(Invoice.status == 'Pending', Invoice.status == 'Sent'), 
+        func.date(Invoice.date_due) < today
+    ).all()
+    
+    if overdue_invoices:
+        for inv in overdue_invoices:
+            inv.status = 'Overdue'
+            log_action('System', 'Auto-Check', 'Invoice Overdue', 'Invoice', inv.invoice_code, 'Warning', f'Invoice marked overdue (Due: {inv.date_due})')
+        db.session.commit()
+
     search_query = request.args.get('search', '')
+    status_filter = request.args.get('status', 'All')
+    sort_by = request.args.get('sort', 'date_desc')
+
+    query = Invoice.query
+
     if search_query:
-        invoices = Invoice.query.filter(Invoice.invoice_code.contains(search_query)).all()
-    else:
-        invoices = Invoice.query.order_by(Invoice.date_created.desc()).all()
+        search_term = f"%{search_query}%"
+        query = query.join(Client).filter(or_(Invoice.invoice_code.like(search_term), Client.name.like(search_term)))
+
+    if status_filter != 'All':
+        query = query.filter(Invoice.status == status_filter)
+
+    if sort_by == 'amount_high': query = query.order_by(Invoice.amount.desc())
+    elif sort_by == 'amount_low': query = query.order_by(Invoice.amount.asc())
+    elif sort_by == 'date_asc': query = query.order_by(Invoice.date_created.asc())
+    else: query = query.order_by(Invoice.date_created.desc())
+
+    invoices = query.all()
     return render_template('invoices.html', invoices=invoices)
 
 @app.route('/invoices/create/<int:order_id>', methods=['GET', 'POST'])
@@ -209,11 +259,11 @@ def create_invoice(order_id):
     if request.method == 'POST':
         try:
             new_code = f"INV-{datetime.now().strftime('%Y%m%d')}-{random.randint(100,999)}"
-            new_invoice = Invoice(invoice_code=new_code, order_id=order.id, client_id=order.client_id, amount=order.amount, status='Sent', date_due=datetime.utcnow() + timedelta(days=30))
+            new_invoice = Invoice(invoice_code=new_code, order_id=order.id, client_id=order.client_id, amount=order.amount, status='Pending', date_due=datetime.utcnow() + timedelta(days=30))
             db.session.add(new_invoice)
             order.status = 'Invoiced'
             db.session.commit()
-            log_action('System', 'AI-Invoice-Bot', 'Invoice Generated', 'Invoice', new_code, 'Success', f'Auto-generated invoice for Order #{order.id}')
+            log_action('System', 'AI-Invoice-Bot', 'Invoice Generated', 'Invoice', new_code, 'Success', f'Auto-generated invoice for Order {order.order_code}')
             flash(f'Invoice {new_code} generated successfully!')
             return redirect(url_for('invoices'))
         except Exception as e:
@@ -233,14 +283,31 @@ def edit_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     if request.method == 'POST':
         try:
-            invoice.amount = float(request.form['amount'])
-            invoice.status = request.form['status']
-            invoice.date_due = datetime.strptime(request.form['date_due'], '%Y-%m-%d')
+            new_amount = float(request.form['amount'])
+            new_status = request.form['status']
+            new_issue_date = datetime.strptime(request.form['date_created'], '%Y-%m-%d')
+            new_due_date = datetime.strptime(request.form['date_due'], '%Y-%m-%d')
+            
+            invoice.amount = new_amount
+            invoice.date_created = new_issue_date
+            invoice.date_due = new_due_date
+            
+            today_date = datetime.now().date()
+            due_date_obj = new_due_date.date()
+            
+            if new_status == 'Paid': invoice.status = 'Paid'
+            elif due_date_obj < today_date:
+                invoice.status = 'Overdue'
+                flash(f'Notice: Status automatically set to Overdue because the due date ({due_date_obj}) is in the past.', 'warning')
+            else:
+                if new_status == 'Overdue': invoice.status = 'Pending'
+                else: invoice.status = new_status
+
             db.session.commit()
             log_action('SuperAdmin', session.get('username'), 'Invoice Edited', 'Invoice', invoice.invoice_code, 'Success', "Updated invoice details")
             flash(f'Invoice {invoice.invoice_code} updated successfully.')
             return redirect(url_for('view_invoice', invoice_id=invoice.id))
-        except:
+        except Exception as e:
             db.session.rollback()
             return redirect(url_for('error_page'))
     return render_template('edit_invoice.html', invoice=invoice)
@@ -273,26 +340,21 @@ def dashboard():
     prev_month = prev_month_date.month
     prev_month_year = prev_month_date.year
 
-    # KPI 1
     total_orders = Order.query.count()
     total_orders_prev = Order.query.filter(Order.date_placed < now - timedelta(days=30)).count()
     order_growth = get_change(total_orders, total_orders_prev)
 
-    # KPI 2
     total_sales = db.session.query(func.sum(Invoice.amount)).scalar() or 0
     sales_prev = db.session.query(func.sum(Invoice.amount)).filter(Invoice.date_created < now.replace(day=1)).scalar() or 0
     sales_growth = get_change(total_sales, sales_prev)
 
-    # KPI 3
     products_sold = Invoice.query.filter_by(status='Paid').count()
     products_prev = Invoice.query.filter(Invoice.status=='Paid', Invoice.date_created < now - timedelta(days=30)).count()
     product_growth = get_change(products_sold, products_prev)
 
-    # KPI 4
     new_customers = Client.query.count() 
     customer_growth = 1.29 
 
-    # Stats: YTD
     ytd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == current_year).scalar() or 0
     last_ytd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == last_year).scalar() or 0
     ytd_sales_growth = ytd_sales - last_ytd_sales
@@ -301,7 +363,6 @@ def dashboard():
     last_ytd_count = Order.query.filter(extract('year', Order.date_placed) == last_year).count()
     ytd_count_growth = ytd_count - last_ytd_count
 
-    # Stats: MTD
     mtd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == current_year, extract('month', Order.date_placed) == current_month).scalar() or 0
     last_mtd_sales = db.session.query(func.sum(Order.amount)).filter(extract('year', Order.date_placed) == prev_month_year, extract('month', Order.date_placed) == prev_month).scalar() or 0
     mtd_sales_diff = mtd_sales - last_mtd_sales
@@ -310,7 +371,6 @@ def dashboard():
     last_mtd_count = Order.query.filter(extract('year', Order.date_placed) == prev_month_year, extract('month', Order.date_placed) == prev_month).count()
     mtd_count_diff = mtd_count - last_mtd_count
 
-    # Graph Data
     chart_invoice_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
     chart_invoice_reality = [0] * 12 
     monthly_sales_query = db.session.query(extract('month', Invoice.date_created), func.sum(Invoice.amount)).filter(extract('year', Invoice.date_created) == current_year).group_by(extract('month', Invoice.date_created)).all()
@@ -361,42 +421,51 @@ def dashboard():
         chart_vol_service_labels=chart_vol_service_labels, chart_vol_data=chart_vol_data, chart_service_data=chart_service_data
     )
 
-# --- AUDIT ROUTES (FIXED) ---
+# --- AUDIT LOG ROUTE (FIXED SEARCH) ---
 @app.route('/audit')
 def audit_log():
     if 'user_id' not in session: return redirect(url_for('login'))
-    
     search_q = request.args.get('q', '')
     action_filter = request.args.get('action_type', '')
     
     query = AuditLog.query
+    
+    # 1. UNIVERSAL SEARCH
     if search_q:
         search_term = f"%{search_q}%"
-        query = query.filter(or_(AuditLog.description.like(search_term), AuditLog.action.like(search_term), AuditLog.actor_id.like(search_term), AuditLog.entity_id.like(search_term)))
-    
+        query = query.filter(
+            or_(
+                AuditLog.description.like(search_term),
+                AuditLog.action.like(search_term),
+                AuditLog.actor_id.like(search_term),
+                AuditLog.actor_type.like(search_term), # Added Actor Type (SuperAdmin)
+                AuditLog.entity_id.like(search_term),
+                AuditLog.entity_type.like(search_term), # Added Entity Type (User, Invoice)
+                AuditLog.status.like(search_term),
+                func.cast(AuditLog.timestamp, db.String).like(search_term) # Added Timestamp
+            )
+        )
+        
+    # 2. FILTER
     if action_filter and action_filter != 'All':
         query = query.filter(AuditLog.action == action_filter)
-
+        
     logs = query.order_by(AuditLog.timestamp.desc()).all()
-    # Fixed: Restored logic to populate dropdown
     unique_actions = [r.action for r in db.session.query(AuditLog.action).distinct()]
-    
     return render_template('audit_log.html', logs=logs, unique_actions=unique_actions)
 
-# This was missing and caused the crash!
 @app.route('/audit/view/<int:log_id>')
 def audit_details(log_id):
     if 'user_id' not in session: return redirect(url_for('login'))
     log = AuditLog.query.get_or_404(log_id)
     return render_template('audit_details.html', log=log)
 
-# --- ADMIN PANEL ROUTES ---
 @app.route('/admin/panel')
 @admin_required
 def admin_panel():
     search_q = request.args.get('q', '')
     query = User.query
-    if search_q: query = query.filter(User.custom_id.like(f"%{search_q}%"))
+    if search_q: query = query.filter(or_(User.custom_id.like(f"%{search_q}%"), User.username.like(f"%{search_q}%")))
     users = query.all()
     return render_template('admin_panel.html', users=users)
 
@@ -407,7 +476,6 @@ def create_admin():
         if User.query.filter_by(username=request.form['username']).first():
             flash('Username already exists.')
             return redirect(url_for('create_admin'))
-        
         count = User.query.count() + 1
         new_user = User(
             custom_id=f"USR-{datetime.now().year}-{count:03d}",
@@ -418,17 +486,35 @@ def create_admin():
         )
         db.session.add(new_user)
         db.session.commit()
+        log_action('SuperAdmin', session.get('username'), 'Account Created', 'User', new_user.custom_id, 'Success', f'Created new {new_user.role} user: {new_user.username}')
         return redirect(url_for('admin_panel'))
     return render_template('admin_create.html')
 
 @app.route('/admin/edit/<int:user_id>', methods=['GET', 'POST'])
 @admin_required
 def edit_admin(user_id):
-    user = User.query.get(user_id)
-    if request.method == 'POST':
-        user.role = request.form['role']
-        db.session.commit()
+    user = User.query.get_or_404(user_id)
+    if user.id == g.user.id:
+        flash("You cannot edit your own authority level.", "danger")
         return redirect(url_for('admin_panel'))
+
+    if request.method == 'POST':
+        admin_password = request.form.get('admin_password')
+        if not admin_password or admin_password != g.user.password:
+            flash("Incorrect password. Authority change denied.", "danger")
+            log_action('SuperAdmin', g.user.username, 'Edit Role Failed', 'User', user.custom_id, 'Failure', 'Incorrect password confirmation')
+            return redirect(url_for('edit_admin', user_id=user.id))
+
+        old_role = user.role
+        new_role = request.form['role']
+        
+        user.role = new_role
+        db.session.commit()
+        
+        log_action('SuperAdmin', g.user.username, 'Authority Changed', 'User', user.custom_id, 'Success', f'Changed role from {old_role} to {new_role}')
+        flash(f'User {user.username} updated to {new_role}.', 'success')
+        return redirect(url_for('admin_panel'))
+        
     return render_template('admin_edit.html', user=user)
 
 @app.route('/admin/reset_password/<int:user_id>', methods=['POST'])
@@ -440,6 +526,7 @@ def reset_password(user_id):
     if new_username: user.username = new_username
     user.must_change_password = True
     db.session.commit()
+    log_action('SuperAdmin', session.get('username'), 'Credentials Updated', 'User', user.custom_id, 'Success', f'Reset password for {user.username}')
     return redirect(url_for('admin_panel'))
 
 @app.route('/admin/suspend/<int:user_id>', methods=['POST'])
@@ -448,14 +535,99 @@ def suspend_admin(user_id):
     user = User.query.get(user_id)
     user.is_suspended = not user.is_suspended
     db.session.commit()
+    
+    action_type = "Account Suspended" if user.is_suspended else "Account Reactivated"
+    log_action('SuperAdmin', session.get('username'), action_type, 'User', user.custom_id, 'Warning', f'User {user.username} status toggled.')
     return redirect(url_for('admin_panel'))
 
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 @admin_required
 def delete_admin(user_id):
-    db.session.delete(User.query.get(user_id))
-    db.session.commit()
+    user = User.query.get(user_id)
+    if user:
+        u_name = user.username
+        u_id = user.custom_id
+        db.session.delete(user)
+        db.session.commit()
+        log_action('SuperAdmin', session.get('username'), 'Account Deleted', 'User', u_id, 'Danger', f'Deleted user: {u_name}')
     return redirect(url_for('admin_panel'))
+
+@app.route('/admin/danger_zone', methods=['GET', 'POST'])
+@admin_required
+def danger_zone():
+    current_skipped = get_total_skipped_days()
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'wipe':
+            try:
+                Invoice.query.delete()
+                Order.query.delete()
+                Client.query.delete()
+                AuditLog.query.delete()
+                reset_skipped_days()
+                db.session.commit()
+                log_action('SuperAdmin', session.get('username'), 'Hard Reset', 'System', 'ALL', 'Success', 'Wiped all business data.')
+                flash('SYSTEM WIPE SUCCESSFUL: All data cleared.', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error during wipe: {str(e)}', 'danger')
+        
+        elif action == 'time_skip':
+            try:
+                days = int(request.form.get('days', 0))
+                if days > 0:
+                    delta = timedelta(days=days)
+                    orders = Order.query.all()
+                    for o in orders: o.date_placed -= delta
+                    invoices = Invoice.query.all()
+                    for i in invoices:
+                        i.date_created -= delta
+                        i.date_due -= delta
+                        if i.status in ['Pending', 'Sent'] and i.date_due < datetime.now():
+                            i.status = 'Overdue'
+                    logs = AuditLog.query.all()
+                    for l in logs: l.timestamp -= delta
+                    
+                    add_skipped_days(days)
+                    db.session.commit()
+                    log_action('SuperAdmin', session.get('username'), 'Time Travel', 'System', 'ALL', 'Success', f'Shifted data back by {days} days.')
+                    flash(f'Time Travel Successful: Data is now {days} days older.', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error: {str(e)}', 'danger')
+
+        elif action == 'undo_time_skip':
+            try:
+                days_to_restore = get_total_skipped_days()
+                if days_to_restore > 0:
+                    delta = timedelta(days=days_to_restore)
+                    orders = Order.query.all()
+                    for o in orders: o.date_placed += delta
+                    invoices = Invoice.query.all()
+                    today = datetime.now()
+                    for i in invoices:
+                        i.date_created += delta
+                        i.date_due += delta
+                        if i.status == 'Overdue' and i.date_due >= today:
+                            i.status = 'Pending'
+                    logs = AuditLog.query.all()
+                    for l in logs: l.timestamp += delta
+                    
+                    reset_skipped_days()
+                    db.session.commit()
+                    log_action('SuperAdmin', session.get('username'), 'Undo Time Travel', 'System', 'ALL', 'Success', f'Restored {days_to_restore} days.')
+                    flash(f'Undo Successful: System restored to original time.', 'success')
+                else:
+                    flash('Time is already synchronized.', 'secondary')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error: {str(e)}', 'danger')
+
+        return redirect(url_for('dashboard'))
+            
+    return render_template('danger_zone.html', days_skipped=current_skipped)
 
 @app.route('/generate_bulk_data')
 @operator_required
@@ -465,13 +637,12 @@ def generate_bulk_data():
     for name in client_names:
         exists = Client.query.filter_by(name=name).first()
         if not exists:
-            email_slug = name.replace(' ', '').replace('&', 'and').lower()
-            c = Client(name=name, email=f"contact@{email_slug}.com", company=name)
+            c = Client(name=name, email=f"contact@{name.replace(' ','').lower()}.com", company=name)
             db.session.add(c)
             clients.append(c)
-        else:
-            clients.append(exists)
+        else: clients.append(exists)
     db.session.commit()
+
     descriptions = ["Summer Collection Shipment", "Bulk T-Shirts Printing", "Winter Coats Manufacturing", "Silk Scarf Production", "Denim Jeans Supply", "Fashion Photoshoot Styling", "Runway Accessories", "Custom Embroidery Service", "Leather Jacket Order", "Sustainable Cotton Fabrics", "Activewear Line Launch", "Vintage Dress Restoration"]
     start_date = datetime.now() - timedelta(days=730) 
     end_date = datetime.now()
@@ -480,19 +651,18 @@ def generate_bulk_data():
         order_date = start_date + timedelta(days=random.randrange(days_between))
         client = random.choice(clients)
         desc = random.choice(descriptions)
-        if "Bulk" in desc or "Supply" in desc: amount = random.uniform(2000, 15000)
-        else: amount = random.uniform(500, 4000)
+        amount = random.uniform(500, 4000)
         status = 'Invoiced' if random.random() > 0.3 else 'Pending'
-        o = Order(client_id=client.id, description=desc, amount=amount, date_placed=order_date, status=status)
+        code = f"ORD-{order_date.strftime('%Y%m')}-{random.randint(1000,9999)}"
+        o = Order(order_code=code, client_id=client.id, description=desc, amount=amount, date_placed=order_date, status=status)
         db.session.add(o)
         db.session.commit()
         if status == 'Invoiced':
             inv_code = f"INV-{order_date.strftime('%Y%m')}-{random.randint(1000,9999)}"
-            inv_status = 'Paid' if random.random() > 0.2 else 'Sent'
-            inv = Invoice(invoice_code=inv_code, order_id=o.id, client_id=client.id, amount=amount, status=inv_status, date_created=order_date + timedelta(minutes=30), date_due=order_date + timedelta(days=30))
+            inv = Invoice(invoice_code=inv_code, order_id=o.id, client_id=client.id, amount=amount, status='Paid', date_created=order_date, date_due=order_date)
             db.session.add(inv)
     db.session.commit()
-    flash("Success! Added 150+ fashion-related mock orders and invoices.")
+    flash("Success! Added 150+ fashion-related mock orders with Proper IDs.")
     return redirect(url_for('dashboard'))
 
 @app.route('/guide')
@@ -503,19 +673,27 @@ def error_page(): return render_template('error.html')
 
 if __name__ == '__main__':
     with app.app_context():
-        # Schema Check & Migration
         try:
             with db.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE user ADD COLUMN role VARCHAR(20) DEFAULT 'Staff'"))
-                conn.execute(text("ALTER TABLE user ADD COLUMN is_suspended BOOLEAN DEFAULT 0"))
-                conn.execute(text("ALTER TABLE user ADD COLUMN custom_id VARCHAR(50)"))
-                conn.execute(text("ALTER TABLE user ADD COLUMN must_change_password BOOLEAN DEFAULT 0"))
-                conn.execute(text("UPDATE user SET role='SuperAdmin' WHERE role='Admin'"))
-                conn.execute(text("UPDATE user SET role='Manager' WHERE role='Operator'"))
-                conn.execute(text("UPDATE user SET role='Staff' WHERE role='View'"))
+                try: conn.execute(text("ALTER TABLE `order` ADD COLUMN order_code VARCHAR(50)"))
+                except: pass
         except: pass
         
         db.create_all()
+        
+        # --- DATA MIGRATION ---
+        # Consolidate "Suspended User" to "Account Suspended"
+        try:
+            db.session.execute(text("UPDATE audit_log SET action = 'Account Suspended' WHERE action = 'Suspended User'"))
+            db.session.execute(text("UPDATE audit_log SET action = 'Account Reactivated' WHERE action = 'Re-activated User'"))
+            db.session.execute(text("UPDATE audit_log SET action = 'Account Deleted' WHERE action = 'Delete User'"))
+            db.session.execute(text("UPDATE audit_log SET action = 'Authority Changed' WHERE action = 'Edit User Role'"))
+            db.session.execute(text("UPDATE audit_log SET action = 'Password Changed' WHERE action = 'Password Change'"))
+            db.session.commit()
+        except Exception as e:
+            print(f"Migration Notice: {e}")
+        # ----------------------
+
         if not User.query.first():
             admin = User(username='admin', password='password123', role='SuperAdmin', custom_id='USR-ADMIN-001')
             db.session.add(admin)
